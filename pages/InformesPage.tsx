@@ -1,11 +1,29 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getReportButtonsForBooth, submitReport, validateCheckin, getButtonConfigs, submitSalesCheckin, getDepartmentsByEvent, getStaffByEvent, getPendingTasksForStaff, apiCompleteTaskActivity, getReportsByEvent, getParticipantCompaniesByEvent } from '../services/api';
-import { ReportButtonConfig, ReportType, Department, Staff, AssignedTask, ReportSubmission, ParticipantCompany } from '../types';
+import { getReportButtonsForBooth, submitReport, validateCheckin, getButtonConfigs, submitSalesCheckin, getDepartmentsByEvent, getStaffByEvent, getPendingTasksForStaff, apiCompleteTaskActivity, getReportsByEvent, getParticipantCompaniesByEvent, getStaffActivity } from '../services/api';
+import { ReportButtonConfig, ReportType, Department, Staff, AssignedTask, ReportSubmission, ParticipantCompany, StaffActivity } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
+
+const MedalIcon: React.FC<{ position: number }> = ({ position }) => {
+    const medals: { [key: number]: string } = {
+        1: '🥇',
+        2: '🥈',
+        3: '🥉',
+    };
+    const medal = medals[position];
+
+    if (!medal) return null;
+
+    return (
+        <span className="ml-2 flex-shrink-0 text-2xl" role="img" aria-label={`Medalha de ${position}º lugar`}>
+            {medal}
+        </span>
+    );
+};
+
 
 const InformesPage: React.FC = () => {
   const { boothCode } = useParams<{ boothCode: string }>();
@@ -61,6 +79,7 @@ const InformesPage: React.FC = () => {
   const [isRankingModalOpen, setIsRankingModalOpen] = useState(false);
   const [allEventReports, setAllEventReports] = useState<ReportSubmission[]>([]);
   const [allEventCompanies, setAllEventCompanies] = useState<ParticipantCompany[]>([]);
+  const [staffActivities, setStaffActivities] = useState<StaffActivity[]>([]);
 
   useEffect(() => {
     let eventIdForFetch: string | null = null;
@@ -94,20 +113,22 @@ const InformesPage: React.FC = () => {
       if (!boothCode || !eventIdForFetch || !staffIdForFetch) return;
       try {
         setLoading(true);
-        const [companyButtons, allSystemButtons, depts, staff, tasks, reports, companies] = await Promise.all([
+        const [companyButtons, allSystemButtons, depts, staff, tasks, reports, companies, activities] = await Promise.all([
             getReportButtonsForBooth(boothCode),
             getButtonConfigs(),
             getDepartmentsByEvent(eventIdForFetch),
             getStaffByEvent(eventIdForFetch),
             getPendingTasksForStaff(staffIdForFetch),
             getReportsByEvent(eventIdForFetch),
-            getParticipantCompaniesByEvent(eventIdForFetch)
+            getParticipantCompaniesByEvent(eventIdForFetch),
+            getStaffActivity(staffIdForFetch)
         ]);
         setPendingTasks(tasks);
         setDepartments(depts);
         setAllStaff(staff);
         setAllEventReports(reports);
         setAllEventCompanies(companies);
+        setStaffActivities(activities);
 
         const buttonsMap = new Map<string, ReportButtonConfig>();
         companyButtons.forEach(btn => buttonsMap.set(btn.id, btn));
@@ -147,10 +168,10 @@ const InformesPage: React.FC = () => {
   const rankingData = useMemo(() => {
     if (allEventReports.length === 0 || allEventCompanies.length === 0) return [];
 
-    const companyNameMap = allEventCompanies.reduce((acc, company) => {
-        acc[company.boothCode] = company.name;
+    const companyInfoMap = allEventCompanies.reduce((acc, company) => {
+        acc[company.boothCode] = { name: company.name, logoUrl: company.logoUrl };
         return acc;
-    }, {} as Record<string, string>);
+    }, {} as Record<string, { name: string, logoUrl?: string }>);
     
     const counts = allEventReports.reduce((acc, report) => {
       acc[report.boothCode] = (acc[report.boothCode] || 0) + 1;
@@ -159,11 +180,18 @@ const InformesPage: React.FC = () => {
 
     return Object.entries(counts)
       .map(([boothCode, value]) => ({
-        label: companyNameMap[boothCode] || boothCode,
+        label: companyInfoMap[boothCode]?.name || boothCode,
         value,
+        logoUrl: companyInfoMap[boothCode]?.logoUrl,
       }))
       .sort((a, b) => b.value - a.value);
   }, [allEventReports, allEventCompanies]);
+
+  const totalActivitiesCount = useMemo(() => {
+    if (!staffActivities) return 0;
+    // Filter out "task assigned" activities, as they are not actions performed by the staff yet.
+    return staffActivities.filter(a => !a.description.startsWith('Tarefa atribuída:')).length;
+  }, [staffActivities]);
 
 
   // Effect to trigger webhook when all buttons are completed
@@ -466,7 +494,11 @@ const InformesPage: React.FC = () => {
       </div>
       
       <div className="my-8 p-4 bg-card rounded-lg shadow-lg">
-        <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+        <div className="text-center mb-6">
+            <h3 className="text-lg font-semibold text-text-secondary">Total de Atividades Registradas</h3>
+            <p className="text-5xl font-bold text-primary tracking-tight">{totalActivitiesCount}</p>
+        </div>
+        <div className="flex flex-col sm:flex-row justify-center items-center gap-4 border-t border-border pt-6">
             <Button onClick={() => setIsTasksModalOpen(true)} className="relative w-full sm:w-auto">
                 Minhas Tarefas
                 {pendingTasks.length > 0 && (
@@ -859,10 +891,18 @@ const InformesPage: React.FC = () => {
               return (
                 <div key={index} className="flex items-center gap-4 group w-full p-2">
                   <span className="text-right font-semibold text-text-secondary w-10">{index + 1}º</span>
-                  <div className="flex-1">
+                  <img 
+                    src={item.logoUrl || 'https://via.placeholder.com/150?text=Logo'} 
+                    alt={`${item.label} logo`} 
+                    className="w-8 h-8 rounded-full object-contain bg-white flex-shrink-0"
+                  />
+                  <div className="flex-1 overflow-hidden">
                     <div className="flex justify-between items-center mb-1">
                       <p className="text-sm font-medium text-text truncate pr-2" title={item.label}>{item.label}</p>
-                      <p className="text-sm font-bold text-primary">{item.value}</p>
+                      <div className="flex items-center">
+                        <p className="text-sm font-bold text-primary">{item.value}</p>
+                        {index < 3 && <MedalIcon position={index + 1} />}
+                      </div>
                     </div>
                     <div className="w-full bg-secondary rounded-full h-4 overflow-hidden">
                       <div

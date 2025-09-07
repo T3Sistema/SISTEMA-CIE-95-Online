@@ -11,13 +11,31 @@ interface Props {
   eventId: string;
 }
 
+const MedalIcon: React.FC<{ position: number }> = ({ position }) => {
+    const medals: { [key: number]: string } = {
+        1: '🥇',
+        2: '🥈',
+        3: '🥉',
+    };
+    const medal = medals[position];
+
+    if (!medal) return null;
+
+    return (
+        <span className="ml-2 flex-shrink-0 text-2xl" role="img" aria-label={`Medalha de ${position}º lugar`}>
+            {medal}
+        </span>
+    );
+};
+
 type ChartData = {
   label: string;
   value: number;
+  logoUrl?: string;
 };
 
 const DownloadIcon = () => (
-    <svg xmlns="http://www.w.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
     </svg>
 );
@@ -29,7 +47,7 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [activities, setActivities] = useState<Record<string, StaffActivity[]>>({});
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'visits' | 'occurrences' | 'staff'>('occurrences');
+  const [view, setView] = useState<'visits' | 'occurrences' | 'staff'>('visits');
   const [selectedOccurrence, setSelectedOccurrence] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -67,11 +85,11 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
     fetchData();
   }, [fetchData]);
 
-  const companyNameMap = useMemo(() => {
+  const companyInfoMap = useMemo(() => {
     return companies.reduce((acc, company) => {
-      acc[company.boothCode] = company.name;
+      acc[company.boothCode] = { name: company.name, logoUrl: company.logoUrl };
       return acc;
-    }, {} as Record<string, string>);
+    }, {} as Record<string, { name: string, logoUrl?: string }>);
   }, [companies]);
 
   const questionMap = useMemo(() => {
@@ -89,11 +107,12 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
 
     return Object.entries(counts)
       .map(([boothCode, value]) => ({
-        label: companyNameMap[boothCode] || boothCode,
+        label: companyInfoMap[boothCode]?.name || boothCode,
         value,
+        logoUrl: companyInfoMap[boothCode]?.logoUrl,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [reports, companyNameMap]);
+  }, [reports, companyInfoMap]);
 
   const occurrencesData: ChartData[] = useMemo(() => {
     const counts = reports.reduce((acc, report) => {
@@ -118,6 +137,7 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
       .map(staff => ({
         label: staff.name,
         value: (activities[staff.id] || []).length,
+        logoUrl: staff.photoUrl,
       }))
       .filter(item => item.value > 0)
       .sort((a, b) => b.value - a.value);
@@ -164,7 +184,7 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
         const responseText = `${question}\n\n${report.response}`;
         
         tableRows.push([
-          companyNameMap[report.boothCode] || report.boothCode,
+          companyInfoMap[report.boothCode]?.name || report.boothCode,
           responseText,
           report.staffName,
           new Date(report.timestamp).toLocaleString('pt-BR'),
@@ -335,17 +355,34 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
                         onClick: () => setSelectedOccurrence(prev => prev === item.label ? null : item.label),
                         className: `w-full text-left p-0 rounded-lg transition-colors ${isSelected ? 'bg-secondary' : 'hover:bg-secondary/50'}`
                     } : {
-                        className: "flex items-center gap-4 group"
+                        className: "w-full"
                     };
 
                     return (
                         <WrapperComponent key={index} {...wrapperProps}>
                             <div className={`flex items-center gap-4 group w-full p-2`}>
                                 <span className="text-right font-semibold text-text-secondary w-10">{index + 1}º</span>
-                                <div className="flex-1">
+                                {view === 'visits' && (
+                                    <img 
+                                        src={item.logoUrl || 'https://via.placeholder.com/150?text=Logo'} 
+                                        alt={`${item.label} logo`} 
+                                        className="w-8 h-8 rounded-full object-contain bg-white flex-shrink-0"
+                                    />
+                                )}
+                                {view === 'staff' && (
+                                    <img 
+                                        src={item.logoUrl || 'https://via.placeholder.com/150'} 
+                                        alt={item.label} 
+                                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                    />
+                                )}
+                                <div className="flex-1 overflow-hidden">
                                     <div className="flex justify-between items-center mb-1">
                                         <p className="text-sm font-medium text-text truncate pr-2" title={item.label}>{item.label}</p>
-                                        <p className="text-sm font-bold text-primary">{item.value}</p>
+                                        <div className="flex items-center">
+                                            <p className="text-sm font-bold text-primary">{item.value}</p>
+                                            {(view === 'visits' || view === 'staff') && index < 3 && <MedalIcon position={index + 1} />}
+                                        </div>
                                     </div>
                                     <div className="w-full bg-secondary rounded-full h-4 overflow-hidden">
                                         <div
@@ -392,7 +429,7 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
 
                     <div className="text-xs text-text-secondary border-t border-border/50 mt-3 pt-2 flex flex-wrap justify-between items-center gap-2">
                         <div>
-                            <p><strong>Estande:</strong> {companyNameMap[report.boothCode] || report.boothCode}</p>
+                            <p><strong>Estande:</strong> {companyInfoMap[report.boothCode]?.name || report.boothCode}</p>
                             <p><strong>Equipe:</strong> {report.staffName}</p>
                         </div>
                         <p className="font-medium text-right">{new Date(report.timestamp).toLocaleString('pt-BR')}</p>
